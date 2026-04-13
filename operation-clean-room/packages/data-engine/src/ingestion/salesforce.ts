@@ -1,5 +1,3 @@
-import { SalesforceOpportunity, SalesforceAccount } from './types.js';
-
 /**
  * Load and normalize Salesforce CRM data (Opportunities and Accounts).
  *
@@ -30,9 +28,60 @@ import { SalesforceOpportunity, SalesforceAccount } from './types.js';
  * @param dataDir - Path to the data directory
  * @returns Tuple of [opportunities, accounts]
  */
+
+import { join } from 'node:path';
+import { loadCSV } from './csv-loader.js';
+import type { SalesforceOpportunity, SalesforceAccount } from './types.js';
+
 export async function loadSalesforceData(
   dataDir: string,
 ): Promise<[SalesforceOpportunity[], SalesforceAccount[]]> {
-  // TODO: Implement - load from sf_opportunities.csv and sf_accounts.csv
-  throw new Error('Not implemented');
+  const [opportunities, accounts] = await Promise.all([
+    loadCSV<SalesforceOpportunity>(join(dataDir, 'salesforce_opportunities.csv'), {
+      transform: (row) => ({
+        opportunity_id: row['opportunity_id'] ?? '',
+        account_id: row['account_id'] ?? '',
+        account_name: row['account_name'] ?? '',
+        opportunity_name: row['opportunity_name'] ?? '',
+        stage: row['stage'] ?? '',
+        amount: parseFloat(row['amount'] ?? '0'),
+        currency: (row['currency'] ?? 'usd').toLowerCase(),
+        close_date: row['close_date'] ?? '',
+        created_date: row['created_date'] ?? '',
+        probability: parseFloat(row['probability'] ?? '0'),
+        forecast_category: row['forecast_category'] ?? 'pipeline',
+        type: row['type'] ?? 'new_business',
+        owner_name: row['owner_name'] ?? '',
+        owner_email: row['owner_email'] ?? '',
+        next_step: row['next_step'] || null,
+        tcv: parseFloat(row['tcv'] ?? '0'),
+        acv: parseFloat(row['acv'] ?? '0'),
+        contract_term_months: parseInt(row['contract_term_months'] ?? '12', 10),
+        competitor: row['competitor'] || null,
+        loss_reason: row['loss_reason'] || null,
+        partner_id: row['partner_id'] || null,
+      }),
+    }),
+    loadCSV<SalesforceAccount>(join(dataDir, 'salesforce_accounts.csv'), {
+      transform: (row) => ({
+        account_id: row['account_id'] ?? '',
+        account_name: row['account_name'] ?? '',
+        industry: row['industry'] ?? '',
+        employee_count: parseInt(row['employee_count'] ?? '0', 10),
+        annual_revenue: parseFloat(row['annual_revenue'] ?? '0'),
+        billing_country: row['billing_country'] ?? '',
+        billing_state: row['billing_state'] ?? '',
+        website: row['website'] ?? '',
+        owner_name: row['owner_name'] ?? '',
+        owner_email: row['owner_email'] ?? '',
+        created_date: row['created_date'] ?? '',
+        segment: row['segment'] ?? 'smb',
+        parent_account_id: row['parent_account_id'] || null,
+        stripe_customer_id: row['stripe_customer_id'] || null,
+        chargebee_customer_id: row['chargebee_customer_id'] || null,
+      }),
+    }),
+  ]);
+
+  return [opportunities, accounts];
 }

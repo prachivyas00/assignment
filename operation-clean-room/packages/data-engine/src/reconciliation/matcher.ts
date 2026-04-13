@@ -41,34 +41,115 @@ export interface MatchOptions {
   allowMultipleMatches?: boolean;
 }
 
+// Common company suffixes to strip before comparing names
+const SUFFIXES = [
+  'corporation', 'incorporated', 'limited', 'corp', 'inc',
+  'ltd', 'llc', 'gmbh', 'co', 'company',
+];
+
 /**
- * Match entities across two data sources using fuzzy matching.
- *
- * @param sourceA - Array of entities from the first data source
- * @param sourceB - Array of entities from the second data source
- * @param options - Matching options
- * @returns Array of match results with confidence scores
+ * Normalize a company name for comparison- lowercase, strip punctuation, remove common suffixes, trim whitespace
+ */
+function normalizeName(name: string): string {
+  const n = name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+  const tokens = n.split(/\s+/);
+  const filtered = tokens.filter(t => !SUFFIXES.includes(t));
+  return (filtered.length > 0 ? filtered : tokens).join(' ');
+}
+
+/**
+ * Jaccard similarity between two strings based on word tokens.
+ * Returns a value between 0 (no overlap) and 1 (identical)
+ */
+function jaccardSimilarity(a: string, b: string): number {
+  const setA = new Set(a.split(/\s+/));
+  const setB = new Set(b.split(/\s+/));
+  const intersection = new Set([...setA].filter(t => setB.has(t)));
+  const union = new Set([...setA, ...setB]);
+  if (union.size === 0) return 0;
+  return intersection.size / union.size;
+}
+
+/**
+ * Calculate the confidence score for a potential match between two entities
+ */
+export async function calculateConfidence(
+  entityA: Record<string, unknown>,
+  entityB: Record<string, unknown>,
+): Promise<MatchConfidence> {
+  const matchedFields: string[] = [];
+  const unmatchedFields: string[] = [];
+  let score = 0;
+
+  // --- Domain matching (weight: 0.5) ---
+  const domainA = typeof entityA.domain === 'string' ? entityA.domain.toLowerCase().trim() : null;
+  const domainB = typeof entityB.domain === 'string' ? entityB.domain.toLowerCase().trim() : null;
+
+  if (domainA && domainB) {
+    if (domainA === domainB) {
+      score += 0.5;
+      matchedFields.push('domain');
+    } else {
+      unmatchedFields.push('domain');
+    }
+  }
+
+  // --- Name matching (weight: 0.5) ---
+  const nameA = typeof entityA.name === 'string' ? normalizeName(entityA.name) : null;
+  const nameB = typeof entityB.name === 'string' ? normalizeName(entityB.name) : null;
+
+  if (nameA && nameB) {
+    const nameSimilarity = jaccardSimilarity(nameA, nameB);
+    score += nameSimilarity * 0.5;
+    if (nameSimilarity > 0.5) {
+      matchedFields.push('name');
+    } else {
+      unmatchedFields.push('name');
+    }
+  }
+
+  return { score, matchedFields, unmatchedFields };
+}
+
+/**
+ * Match entities across two data sources using fuzzy matching
  */
 export async function matchEntities(
   sourceA: Record<string, unknown>[],
   sourceB: Record<string, unknown>[],
   options?: MatchOptions,
 ): Promise<MatchResult[]> {
-  // TODO: Implement cross-system entity matching
-  throw new Error('Not implemented');
-}
+  const threshold = options?.threshold ?? 0.6;
+  const results: MatchResult[] = [];
 
-/**
- * Calculate the confidence score for a potential match between two entities.
- *
- * @param entityA - First entity (must have at minimum: id, name)
- * @param entityB - Second entity (must have at minimum: id, name)
- * @returns Confidence assessment with score, matched fields, and unmatched fields
- */
-export async function calculateConfidence(
-  entityA: Record<string, unknown>,
-  entityB: Record<string, unknown>,
-): Promise<MatchConfidence> {
-  // TODO: Implement composite confidence scoring
-  throw new Error('Not implemented');
+  for (const entityA of sourceA) {
+    let bestMatch: MatchResult | null = null;
+
+    for (const entityB of sourceB) {
+      const confidence = await calculateConfidence(entityA, entityB);
+      if (confidence.score >= threshold) {
+        if (!bestMatch || confidence.score > bestMatch.confidence.score) {
+          bestMatch = {
+            entityA: {
+              id: String(entityA.id ?? ''),
+              source: String(entityA.source ?? ''),
+              ...entityA,
+            },
+            entityB: {
+              id: String(entityB.id ?? ''),
+              source: String(entityB.source ?? ''),
+              ...entityB,
+            },
+            confidence,
+          };
+        }
+      }
+    }
+
+    if (bestMatch) {
+      results.push(bestMatch);
+    }
+  }
+
+  return results;
 }
